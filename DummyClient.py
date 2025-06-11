@@ -12,8 +12,10 @@ def send_request(endpoint, payload, output_text):
         output_text.insert(tk.END, f"Status Code: {response.status_code}\n")
         output_text.insert(tk.END, f"Response: {response.text}")
         output_text.config(state=tk.DISABLED)
+        return response
     except Exception as e:
         messagebox.showerror("Request Error", f"Error: {str(e)}")
+        return None
 
 def create_tab_register(notebook):
     frame = ttk.Frame(notebook, padding=10)
@@ -124,25 +126,30 @@ def create_tab_turn(notebook):
         data = {"id": id_entry.get(), "number": number_entry.get()}
         send_request("/take_turn", data, output)
 
-def create_tab_win(notebook):
+def create_tab_start_game(notebook):
     frame = ttk.Frame(notebook, padding=10)
-    notebook.add(frame, text="Declare Win")
+    notebook.add(frame, text="Start Game")
     
-    form_frame = ttk.LabelFrame(frame, text="Win Declaration", padding=(10, 5))
+    form_frame = ttk.LabelFrame(frame, text="New Game Setup", padding=(10, 5))
     form_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
     
     form_frame.columnconfigure(1, weight=1)
-    for i in range(3):
+    for i in range(4):
         form_frame.rowconfigure(i, weight=1)
 
-    ttk.Label(form_frame, text="Player ID:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    id_entry = ttk.Entry(form_frame)
-    id_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+    ttk.Label(form_frame, text="Player 1 ID:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+    player1_entry = ttk.Entry(form_frame)
+    player1_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+    
+    ttk.Label(form_frame, text="Player 2 ID:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+    player2_entry = ttk.Entry(form_frame)
+    player2_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
     
     btn_frame = ttk.Frame(form_frame)
-    btn_frame.grid(row=1, column=0, columnspan=2, pady=10)
+    btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
     
-    ttk.Button(btn_frame, text="Declare Win", command=lambda: submit_win(id_entry, output)).pack(padx=5, pady=5)
+    ttk.Button(btn_frame, text="Start New Game", 
+               command=lambda: submit_start_game(player1_entry, player2_entry, output)).pack(padx=5, pady=5)
     
     output_frame = ttk.LabelFrame(frame, text="Server Response", padding=(10, 5))
     output_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
@@ -152,14 +159,17 @@ def create_tab_win(notebook):
     output = scrolledtext.ScrolledText(output_frame, height=6, wrap=tk.WORD, state=tk.DISABLED, font=("Consolas", 9))
     output.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
     
-    def submit_win(id_entry, output):
-        data = {"id": id_entry.get()}
-        send_request("/declare_win", data, output)
+    def submit_start_game(player1_entry, player2_entry, output):
+        data = {
+            "player1": player1_entry.get(),
+            "player2": player2_entry.get()
+        }
+        send_request("/start_game", data, output)
 
 def main():
     root = tk.Tk()
     root.title("Multiplayer Bingo Client")
-    root.geometry("500x500")
+    root.geometry("550x600")
     
     # Apply modern theme
     style = ttk.Style()
@@ -179,7 +189,7 @@ def main():
     create_tab_register(notebook)
     create_tab_board(notebook)
     create_tab_turn(notebook)
-    create_tab_win(notebook)
+    create_tab_start_game(notebook)  # Start Game tab
     
     # Status bar
     status_var = tk.StringVar(value="Ready")
