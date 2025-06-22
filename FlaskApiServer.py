@@ -1,80 +1,133 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
+from datetime import date
 
 app = Flask(__name__)
-CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///attendance.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Simulated in-memory "database"
-users = {}
-games = {}
-game_sessions = {}
+db = SQLAlchemy(app)
 
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    user_id = data.get('user_id')
+
+# ======= MODELS =======
+class Student(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+
+
+class Attendance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
+    date = db.Column(db.String(10), nullable=False)
+    status = db.Column(db.String(10), nullable=False)
+
+
+# ======= ENDPOINTS =======
+
+# Add student
+@app.route('/students', methods=['POST'])
+def add_student():
+    data = request.json
     name = data.get('name')
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
 
-    if not user_id or not name:
-        return jsonify({'message': 'Missing user_id or name'}), 400
+    student = Student(name=name)
+    db.session.add(student)
+    db.session.commit()
+    return jsonify({'message': 'Student added', 'id': student.id}), 201
 
-    if user_id in users:
-        return jsonify({'message': 'User already exists'}), 400
 
-    users[user_id] = {'name': name}
-    print(f"[DB SIM] Registered user: {user_id} -> {name}")
-    return jsonify({'message': f'Registration successful for {name}'}), 200
+# Update student
+@app.route('/students/<int:student_id>', methods=['PUT'])
+def update_student(student_id):
+    data = request.json
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
 
-@app.route('/submit_board', methods=['POST'])
-def submit_board():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    board = data.get('board')
+    student.name = data.get('name', student.name)
+    db.session.commit()
+    return jsonify({'message': 'Student updated'}), 200
 
-    if user_id not in users:
-        return jsonify({'message': 'User not registered'}), 400
 
-    game_sessions[user_id] = {'board': board}
-    print(f"[DB SIM] Board submitted by {user_id}: {board}")
-    return jsonify({'message': 'Board submitted successfully'}), 200
+# Delete student
+@app.route('/students/<int:student_id>', methods=['DELETE'])
+def delete_student(student_id):
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
 
-@app.route('/start_game', methods=['POST'])
-def start_game():
-    data = request.get_json()
-    player1 = data.get('player1')
-    player2 = data.get('player2')
+    Attendance.query.filter_by(student_id=student_id).delete()
+    db.session.delete(student)
+    db.session.commit()
+    return jsonify({'message': 'Student and related attendance deleted'}), 200
 
-    if player1 not in users or player2 not in users:
-        return jsonify({'message': 'One or both users not registered'}), 400
 
-    game_id = f"{player1}_vs_{player2}"
-    games[game_id] = {
-        'players': [player1, player2],
-        'turn': player1,
-        'moves': []
-    }
+# Mark attendance
+@app.route('/attendance', methods=['POST'])
+def mark_attendance():
+    data = request.json
+    student_id = data.get('student_id')
+    status = data.get('status', 'present').lower()
+    att_date = data.get('date', date.today().isoformat())
 
-    print(f"[DB SIM] Game started: {game_id}")
-    return jsonify({'message': f'Game started between {player1} and {player2}'}), 200
+    if status not in ['present', 'absent']:
+        return jsonify({'error': 'Invalid status'}), 400
 
-@app.route('/mark_number', methods=['POST'])
-def mark_number():
-    data = request.get_json()
-    game_id = data.get('game_id')
-    user_id = data.get('user_id')
-    number = data.get('number')
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'error': 'Student not found'}), 404
 
-    game = games.get(game_id)
-    if not game or user_id not in game['players']:
-        return jsonify({'message': 'Invalid game or user'}), 400
+    existing = Attendance.query.filter_by(student_id=student_id, date=att_date).first()
+    if existing:
+        return jsonify({'error': 'Attendance already marked'}), 409
 
-    if game['turn'] != user_id:
-        return jsonify({'message': 'Not your turn'}), 400
+    attendance = Attendance(student_id=student_id, status=status, date=att_date)
+    db.session.add(attendance)
+    db.session.commit()
+    return jsonify({'message': 'Attendance marked'}), 200
 
-    game['moves'].append({'user': user_id, 'number': number})
-    game['turn'] = game['players'][1] if game['turn'] == game['players'][0] else game['players'][0]
-    print(f"[DB SIM] {user_id} marked {number} in {game_id}")
-    return jsonify({'message': f'{user_id} marked number {number}'}), 200
 
+# Get all attendance
+@app.route('/attendance', methods=['GET'])
+def get_attendance():
+    records = Attendance.query.all()
+    result = []
+    for record in records:
+        student = Student.query.get(record.student_id)
+        result.append({
+            'id': record.id,
+            'student_id': record.student_id,
+            'student_name': student.name if student else 'Unknown',
+            'date': record.date,
+            'status': record.status
+        })
+    return jsonify(result), 200
+
+
+# Update attendance
+@app.route('/attendance', methods=['PUT'])
+def update_attendance():
+    data = request.json
+    student_id = data.get('student_id')
+    att_date = data.get('date')
+    new_status = data.get('status', 'present').lower()
+
+    if not student_id or not att_date:
+        return jsonify({'error': 'student_id and date are required'}), 400
+
+    record = Attendance.query.filter_by(student_id=student_id, date=att_date).first()
+    if not record:
+        return jsonify({'error': 'Attendance record not found'}), 404
+
+    record.status = new_status
+    db.session.commit()
+    return jsonify({'message': 'Attendance updated'}), 200
+
+
+# ======= RUN APP (Flask 3.x+ Compatible) =======
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
